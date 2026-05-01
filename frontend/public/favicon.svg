@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#a855f7"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24"/>
+      <stop offset="100%" style="stop-color:#f97316"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- Flame body -->
+  <path d="M32 52 C20 52 14 43 14 35 C14 27 20 22 24 18 C24 24 27 26 29 24 C29 18 34 12 38 8 C38 18 44 20 44 28 C47 24 46 20 45 17 C50 22 50 30 50 35 C50 43 44 52 32 52Z" fill="url(#flame)"/>
+  <!-- Inner flame highlight -->
+  <path d="M32 46 C26 46 23 40 23 36 C23 32 26 29 28 27 C28 31 30 32 31 31 C31 27 34 23 36 21 C36 27 39 28 39 33 C41 30 40 27 40 26 C43 29 43 33 43 36 C43 40 38 46 32 46Z" fill="#fef3c7" opacity="0.6"/>
+</svg>

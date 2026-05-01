@@ -1,0 +1,10 @@
+services:
+  neetcode-tracker:
+    build: .
+    image: neetcode-tracker:latest
+    container_name: neetcode-tracker
+    restart: unless-stopped
+    ports:
+      - "6969:8000"
+    volumes:
+      - /volume1/docker/appdata/neetcode-tracker:/data
