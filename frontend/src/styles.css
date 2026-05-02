@@ -620,6 +620,26 @@ body::after {
 .chip.new    { background: rgba(167, 139, 250, 0.14); color: #c4b5fd; border: 1px dashed rgba(167, 139, 250, 0.3); }
 .chip.date   { background: transparent; color: var(--text-mute); padding: 2px 0; }
 
+.shaky-group { margin-bottom: 24px; }
+.shaky-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-mute);
+  margin-bottom: 10px;
+  padding-left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shaky-group-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 .iaction {
   width: 30px; height: 30px;
   display: grid; place-items: center;

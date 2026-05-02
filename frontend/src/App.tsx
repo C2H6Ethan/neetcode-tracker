@@ -22,6 +22,29 @@ const fmtDate = (s: string) => {
 const toLeetCodeUrl = (name: string) =>
   `https://leetcode.com/problems/${name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim().replace(/\s+/g, "-")}/`;
 
+const REVIEW_INTERVALS = [1, 3, 7];
+
+const getShakyDueDate = (p: Problem): Date | null => {
+  if (!p.shaky || !p.shaky_set_date) return null;
+  const interval = REVIEW_INTERVALS[Math.min(p.review_count, REVIEW_INTERVALS.length - 1)];
+  const d = new Date(p.shaky_set_date + "T00:00:00");
+  d.setDate(d.getDate() + interval);
+  return d;
+};
+
+const getShakyDueLabel = (p: Problem, todayStr: string): string => {
+  const due = getShakyDueDate(p);
+  if (!due) return "Unknown";
+  const today = new Date(todayStr + "T00:00:00");
+  const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (diff <= 0) return "Due Today";
+  if (diff === 1) return "Tomorrow";
+  return `In ${diff} days`;
+};
+
+const shakyDots = (reviewCount: number) =>
+  REVIEW_INTERVALS.map((_, i) => (i < reviewCount ? "●" : "○")).join("");
+
 // ====== Animated SVG ring ======
 function Ring({ pct }: { pct: number }) {
   const r = 92;
@@ -118,7 +141,7 @@ function ProblemRow({
         <div className="problem-title-row">
           <a className="problem-name" href={toLeetCodeUrl(p.name)} target="_blank" rel="noreferrer">{p.name}</a>
           <span className={`chip ${p.difficulty}`}>{p.difficulty}</span>
-          {p.shaky && <span className="chip shaky"><IconAlertTriangle size={10} /> shaky</span>}
+          {p.shaky && <span className="chip shaky"><IconAlertTriangle size={10} /> {shakyDots(p.review_count)}</span>}
           {showKind && p.kind === "review" && <span className="chip review">review</span>}
           {showKind && p.kind === "new" && <span className="chip new">new</span>}
           {p.completed_date && <span className="chip date">✓ {p.completed_date}</span>}
@@ -863,30 +886,57 @@ export default function App() {
         )}
 
         {/* SHAKY */}
-        {tab === "review" && (
-          <div>
-            <div className="section-head">
-              <div className="section-title">Shaky · flagged for review</div>
-              <div className="section-meta">{state.sunday_review.length} flagged</div>
-            </div>
-            {state.sunday_review.length === 0 ? (
+        {tab === "review" && (() => {
+          const shaky = state.sunday_review;
+          if (shaky.length === 0) return (
+            <div>
+              <div className="section-head">
+                <div className="section-title">Shaky · flagged for review</div>
+                <div className="section-meta">0 flagged</div>
+              </div>
               <div className="empty">
                 <div className="empty-emoji">✨</div>
                 <div>Nothing flagged. Mark problems shaky as you struggle through them.</div>
               </div>
-            ) : (
-              state.sunday_review.map(p => (
-                <ProblemRow
-                  key={p.id} p={p}
-                  onToggleDone={() => handleToggle(p)}
-                  onToggleShaky={() => handleShaky(p)}
-                  onReview={() => handleReview(p)}
-                  onNotes={(n) => handleNotes(p, n)}
-                />
-              ))
-            )}
-          </div>
-        )}
+            </div>
+          );
+
+          const SECTION_ORDER = ["Due Today", "Tomorrow", "In 2 days", "In 3 days", "In 4 days", "In 5 days", "In 6 days", "In 7 days"];
+          const groups: Record<string, Problem[]> = {};
+          for (const p of shaky) {
+            const label = getShakyDueLabel(p, state.today);
+            if (!groups[label]) groups[label] = [];
+            groups[label].push(p);
+          }
+          const sortedLabels = Object.keys(groups).sort((a, b) => {
+            const ai = SECTION_ORDER.indexOf(a);
+            const bi = SECTION_ORDER.indexOf(b);
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          });
+
+          return (
+            <div>
+              <div className="section-head">
+                <div className="section-title">Shaky · flagged for review</div>
+                <div className="section-meta">{shaky.length} flagged</div>
+              </div>
+              {sortedLabels.map(label => (
+                <div key={label} className="shaky-group">
+                  <div className="shaky-group-label">{label}</div>
+                  {groups[label].map(p => (
+                    <ProblemRow
+                      key={p.id} p={p}
+                      onToggleDone={() => handleToggle(p)}
+                      onToggleShaky={() => handleShaky(p)}
+                      onReview={() => handleReview(p)}
+                      onNotes={(n) => handleNotes(p, n)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* TOPICS */}
         {tab === "topics" && (

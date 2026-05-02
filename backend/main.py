@@ -300,9 +300,16 @@ def patch_problem(pid: int, upd: ProblemUpdate):
             if upd.done:
                 if not p["completed_date"]:
                     p["completed_date"] = today
+                p["last_done_date"] = today
                 bump_today(s)
             else:
+                # Only decrement today's count if it was checked off today
+                if p.get("last_done_date") == today:
+                    t = today_iso()
+                    if s["completions_log"].get(t, 0) > 0:
+                        s["completions_log"][t] -= 1
                 p["completed_date"] = None
+                p["last_done_date"] = None
 
         if upd.shaky is not None:
             if upd.shaky and not p["shaky"]:
