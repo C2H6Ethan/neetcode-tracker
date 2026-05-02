@@ -217,7 +217,7 @@ def todays_problems(state: dict) -> list[dict]:
     picked_reviews = due_reviews[:max_reviews]
     review_ids = {p["id"] for p in picked_reviews}
     # new picks: unsolved problems (not done) excluding reviews, or completed-today to keep mid-session
-    new_picks = [p for p in unsolved if p["id"] not in review_ids][:goal - len(picked_reviews)]
+    new_picks = [p for p in sticky if p["id"] not in review_ids][:goal - len(picked_reviews)]
     return [{**p, "kind": "review"} for p in picked_reviews] + [{**p, "kind": "new"} for p in new_picks]
 
 
