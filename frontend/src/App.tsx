@@ -282,11 +282,10 @@ function GoalDoneCard({
   onNotes: (p: Problem, n: string) => void;
 }) {
   const [showList, setShowList] = useState(false);
-  // bonusIndex: how many extra-credit problems are visible
-  const [bonusIndex, setBonusIndex] = useState(0);
-  const visibleBonus = extraCredit.slice(0, bonusIndex + 1);
-  const currentBonus = extraCredit[bonusIndex];
-  const currentBonusDone = currentBonus?.done;
+  const [currentBonusId, setCurrentBonusId] = useState<number | null>(extraCredit[0]?.id ?? null);
+  const currentBonus = extraCredit.find(p => p.id === currentBonusId) ?? extraCredit[0] ?? null;
+  const currentBonusDone = currentBonus?.done ?? false;
+  const nextBonus = extraCredit.find(p => !p.done && p.id !== currentBonus?.id);
 
   return (
     <>
@@ -340,24 +339,22 @@ function GoalDoneCard({
             </span>
           </div>
 
-          {visibleBonus.map((p, i) => (
+          {currentBonus && (
             <ProblemRow
-              key={p.id} p={p}
-              onToggleDone={() => onToggleDone(p)}
-              onToggleShaky={() => onToggleShaky(p)}
-              onReview={p.shaky ? () => onReview(p) : undefined}
-              onNotes={(n) => onNotes(p, n)}
+              key={currentBonus.id} p={currentBonus}
+              onToggleDone={() => onToggleDone(currentBonus)}
+              onToggleShaky={() => onToggleShaky(currentBonus)}
+              onReview={currentBonus.shaky ? () => onReview(currentBonus) : undefined}
+              onNotes={(n) => onNotes(currentBonus, n)}
             />
-          ))}
+          )}
 
-          {/* Pull next — show only after current bonus is done, and more exist */}
-          {currentBonusDone && bonusIndex + 1 < extraCredit.length && (
-            <button className="pull-btn" onClick={() => setBonusIndex(i => i + 1)}>
+          {currentBonusDone && nextBonus && (
+            <button className="pull-btn" onClick={() => setCurrentBonusId(nextBonus.id)}>
               Pull another <IconArrowRight size={14} />
             </button>
           )}
-          {/* First pull prompt */}
-          {!currentBonusDone && bonusIndex === 0 && (
+          {!currentBonusDone && (
             <div style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 6 }}>
               Solve it, then pull another if you want more.
             </div>
