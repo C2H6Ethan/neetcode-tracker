@@ -639,11 +639,9 @@ export default function App() {
   const pct = (state.total_done / 150) * 100;
   const daysLeft = Math.max(0, Math.ceil((new Date(state.target_date).getTime() - Date.now()) / 86400000));
   const todayList = state.todays_problems;
-  const todayDoneCount = todayList.filter(p => p.done).length;
-  // Goal is hit when every problem in today's sticky list is checked off.
-  // Using the list (not the log) means raising the goal correctly un-hits it.
-  const goalHit = todayList.length > 0 && todayList.every(p => p.done) && state.remaining > 0;
-  const todayPct = todayList.length > 0 ? todayDoneCount / todayList.length : 0;
+  const todayDoneCount = state.today_done_count;
+  const goalHit = state.today_done_count >= state.daily_goal && state.remaining > 0;
+  const todayPct = Math.min(1, state.today_done_count / state.daily_goal);
   const onPace = state.pace_7d >= state.required_pace;
 
   // Trigger confetti once per day on goal hit
