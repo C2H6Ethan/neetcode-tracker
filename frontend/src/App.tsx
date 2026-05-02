@@ -19,6 +19,9 @@ const fmtDate = (s: string) => {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 };
 
+const toLeetCodeUrl = (name: string) =>
+  `https://leetcode.com/problems/${name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim().replace(/\s+/g, "-")}/`;
+
 // ====== Animated SVG ring ======
 function Ring({ pct }: { pct: number }) {
   const r = 92;
@@ -113,7 +116,7 @@ function ProblemRow({
       <Check checked={p.done} onClick={onToggleDone} />
       <div className="problem-body">
         <div className="problem-title-row">
-          <span className="problem-name">{p.name}</span>
+          <a className="problem-name" href={toLeetCodeUrl(p.name)} target="_blank" rel="noreferrer">{p.name}</a>
           <span className={`chip ${p.difficulty}`}>{p.difficulty}</span>
           {p.shaky && <span className="chip shaky"><IconAlertTriangle size={10} /> shaky</span>}
           {showKind && p.kind === "review" && <span className="chip review">review</span>}
