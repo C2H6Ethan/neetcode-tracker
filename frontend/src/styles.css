@@ -581,9 +581,12 @@ body::after {
   letter-spacing: -0.01em;
   color: inherit;
   text-decoration: none;
+  cursor: pointer;
 }
 .problem-name:hover {
   color: var(--violet);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .problem.done .problem-name {
   text-decoration: line-through;
