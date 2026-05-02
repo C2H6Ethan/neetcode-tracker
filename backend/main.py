@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import os
+import random
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import Lock
@@ -11,15 +12,83 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from anthropic import Anthropic
 
 from problems import NEETCODE_150, TOPIC_ORDER
 
 DATA_PATH = Path(os.environ.get("DATA_PATH", "/data/data.json"))
 STATIC_DIR = Path(os.environ.get("STATIC_DIR", "/app/static"))
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 TARGET_DATE = date(2026, 7, 15)
 REVIEW_INTERVALS = [1, 3, 7]  # days
 
 _lock = Lock()
+
+def get_anthropic():
+    """Lazy init Anthropic client."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    return Anthropic(api_key=ANTHROPIC_API_KEY)
+
+# Behavioral interview question bank
+BEHAVIORAL_QUESTIONS = {
+    "Leadership": [
+        "Tell me about a time you had to lead a team on a project with no clear direction.",
+        "Describe a situation where you had to motivate a team member who was underperforming.",
+        "Give an example of when you took ownership of a problem that wasn't originally your responsibility.",
+        "Tell me about a time you delegated work to a team member and how you ensured its quality.",
+        "Describe a project where you had to inspire a team to achieve a challenging goal.",
+    ],
+    "Teamwork": [
+        "Tell me about a time you had to work with someone whose work style was very different from yours.",
+        "Describe a situation where you had to ask for help from a colleague.",
+        "Give an example of when you supported a team member to succeed.",
+        "Tell me about a time you collaborated with someone outside your immediate team.",
+        "Describe a project where you had to coordinate efforts across multiple teams.",
+    ],
+    "Conflict Resolution": [
+        "Tell me about a time you disagreed with a colleague on how to approach a task.",
+        "Describe a situation where you had to deliver bad news to a stakeholder.",
+        "Give an example of when you had to stand up for something you believed in at work.",
+        "Tell me about a time you mediated a conflict between two team members.",
+        "Describe a situation where you had to change your approach based on someone's feedback.",
+    ],
+    "Problem Solving": [
+        "Tell me about a complex problem you solved and walk me through your approach.",
+        "Describe a time when you had to solve a problem with incomplete information.",
+        "Give an example of when you identified a problem before it became critical.",
+        "Tell me about a time you had to think outside the box to solve a problem.",
+        "Describe a situation where your initial approach didn't work and how you pivoted.",
+    ],
+    "Adaptability": [
+        "Tell me about a time you had to adapt to a major change in project requirements.",
+        "Describe a situation where you had to learn a new skill quickly under pressure.",
+        "Give an example of when you had to work with new technology for the first time.",
+        "Tell me about a time plans changed and how you handled it.",
+        "Describe a situation where you had to be flexible with your priorities.",
+    ],
+    "Communication": [
+        "Tell me about a time you had to explain a complex concept to someone non-technical.",
+        "Describe a situation where you had to communicate bad news to a team.",
+        "Give an example of when you had to present an idea that wasn't well received initially.",
+        "Tell me about a time you had to write documentation or a detailed report.",
+        "Describe a situation where miscommunication caused a problem and how you resolved it.",
+    ],
+    "Time Management": [
+        "Tell me about a time you had to juggle multiple priorities with competing deadlines.",
+        "Describe a situation where you had to say no to a request.",
+        "Give an example of when you successfully delivered a project on a tight timeline.",
+        "Tell me about a time you had to reprioritize your work.",
+        "Describe a situation where you improved your efficiency or productivity.",
+    ],
+    "Failure & Growth": [
+        "Tell me about a time you failed and what you learned from it.",
+        "Describe a situation where you made a mistake that impacted the team.",
+        "Give an example of when you had to admit you were wrong.",
+        "Tell me about a time you received critical feedback and how you handled it.",
+        "Describe a mistake you made and how you prevented it from happening again.",
+    ],
+}
 
 
 def default_state() -> dict:
@@ -41,6 +110,7 @@ def default_state() -> dict:
         "daily_goal": 3,
         "problems": problems,
         "completions_log": {},  # iso_date -> count of problems completed/reviewed that day
+        "behavioral_history": [],  # list of past behavioral interview attempts
     }
 
 
@@ -51,7 +121,11 @@ def load() -> dict:
         save(s)
         return s
     with DATA_PATH.open() as f:
-        return json.load(f)
+        s = json.load(f)
+    # Migrations: ensure new fields exist
+    if "behavioral_history" not in s:
+        s["behavioral_history"] = []
+    return s
 
 
 def save(state: dict) -> None:
@@ -113,9 +187,10 @@ def projected_finish(state: dict) -> Optional[str]:
     remaining = sum(1 for p in state["problems"] if not p["done"])
     if remaining == 0:
         return None
-    pace = compute_pace(state["completions_log"], 7)
-    if pace <= 0:
-        pace = state["daily_goal"]  # optimistic fallback
+    # Use whichever is higher: actual 7d pace or daily goal.
+    # Assumes you'll at least hit your goal going forward, so the projection
+    # doesn't look worse than "on track" just because the rolling avg is low.
+    pace = max(compute_pace(state["completions_log"], 7), state["daily_goal"])
     days = remaining / pace
     return (date.today() + timedelta(days=int(round(days)))).isoformat()
 
@@ -129,17 +204,30 @@ def required_pace(state: dict) -> float:
 
 
 def todays_problems(state: dict) -> list[dict]:
-    """Pick today's problems: prioritize due reviews (shaky), fill rest with next unsolved roadmap order.
-    Cap reviews to goal-1 so at least one new problem is included unless nothing new remains."""
+    """Pick today's problems: sticky — problems completed today hold their slot so the list
+    doesn't refill mid-session. Prioritize due reviews, fill rest with next unsolved."""
     today = date.today()
+    today_str = today.isoformat()
     goal = state["daily_goal"]
     due_reviews = [p for p in state["problems"] if is_due(p, today)]
-    unsolved = [p for p in state["problems"] if not p["done"]]
+    # unsolved problems OR problems already completed today (they keep their slot)
+    sticky = [p for p in state["problems"] if not p["done"] or p["completed_date"] == today_str]
+    unsolved = [p for p in sticky if not p["done"]]
     max_reviews = max(0, goal - 1) if unsolved else goal
     picked_reviews = due_reviews[:max_reviews]
     review_ids = {p["id"] for p in picked_reviews}
+    # new picks: unsolved problems (not done) excluding reviews, or completed-today to keep mid-session
     new_picks = [p for p in unsolved if p["id"] not in review_ids][:goal - len(picked_reviews)]
     return [{**p, "kind": "review"} for p in picked_reviews] + [{**p, "kind": "new"} for p in new_picks]
+
+
+def extra_credit_problems(state: dict, today_ids: set, n: int = 5) -> list[dict]:
+    """Next N unsolved problems beyond today's queue — for bonus work."""
+    return [
+        {**p, "kind": "new"}
+        for p in state["problems"]
+        if not p["done"] and p["id"] not in today_ids
+    ][:n]
 
 
 def sunday_review(state: dict) -> list[dict]:
@@ -175,6 +263,8 @@ class GoalUpdate(BaseModel):
 def get_state():
     with _lock:
         s = load()
+        today_probs = todays_problems(s)
+        today_ids = {p["id"] for p in today_probs}
         return {
             "daily_goal": s["daily_goal"],
             "target_date": TARGET_DATE.isoformat(),
@@ -183,7 +273,9 @@ def get_state():
             "problems": s["problems"],
             "topic_order": TOPIC_ORDER,
             "topic_summary": topic_summary(s),
-            "todays_problems": todays_problems(s),
+            "todays_problems": today_probs,
+            "extra_credit": extra_credit_problems(s, today_ids),
+            "today_done_count": s["completions_log"].get(today_iso(), 0),
             "sunday_review": sunday_review(s),
             "streak": compute_streak(s["completions_log"], s["daily_goal"]),
             "pace_7d": round(compute_pace(s["completions_log"], 7), 2),
@@ -264,6 +356,84 @@ def reset():
     with _lock:
         save(default_state())
         return {"ok": True}
+
+
+# ---- Behavioral Interview ----
+@app.get("/api/behavioral/question")
+def get_behavioral_question(category: Optional[str] = None):
+    """Get a random behavioral interview question."""
+    if category and category in BEHAVIORAL_QUESTIONS:
+        questions = BEHAVIORAL_QUESTIONS[category]
+    else:
+        questions = [q for qs in BEHAVIORAL_QUESTIONS.values() for q in qs]
+    question = random.choice(questions)
+    actual_category = next(k for k, v in BEHAVIORAL_QUESTIONS.items() if question in v)
+    return {"question": question, "category": actual_category}
+
+
+class BehavioralReviewRequest(BaseModel):
+    question: str
+    answer: str
+
+
+@app.post("/api/behavioral/review")
+def review_behavioral_answer(req: BehavioralReviewRequest):
+    """Review a behavioral answer using Claude and return score + feedback."""
+    client = get_anthropic()
+    if not client:
+        raise HTTPException(500, "Claude API not configured")
+
+    prompt = f"""You are an expert behavioral interview coach. Evaluate this answer using the STAR method (Situation, Task, Action, Result).
+
+Question: {req.question}
+
+Answer: {req.answer}
+
+Evaluate on a scale of 1-10. For each STAR component, indicate if it's clear, missing, or weak.
+Provide constructive feedback.
+
+Return ONLY valid JSON (no markdown, no triple backticks):
+{{
+  "score": <1-10>,
+  "star": {{
+    "situation": "<clear/weak/missing>",
+    "task": "<clear/weak/missing>",
+    "action": "<clear/weak/missing>",
+    "result": "<clear/weak/missing>"
+  }},
+  "strengths": [<list of 2-3 strengths>],
+  "improvements": [<list of 2-3 areas to improve>],
+  "summary": "<1-2 sentence summary>"
+}}"""
+
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        response_text = message.content[0].text
+        review = json.loads(response_text)
+
+        # Store in history
+        with _lock:
+            s = load()
+            s["behavioral_history"].append({
+                "date": today_iso(),
+                "question": req.question,
+                "category": next((k for k, v in BEHAVIORAL_QUESTIONS.items() if req.question in v), "Other"),
+                "answer_snippet": req.answer[:100],
+                "score": review.get("score", 0),
+            })
+            # Keep last 20
+            s["behavioral_history"] = s["behavioral_history"][-20:]
+            save(s)
+
+        return review
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid response from Claude")
+    except Exception as e:
+        raise HTTPException(500, f"Claude API error: {str(e)}")
 
 
 # ---- Static frontend ----

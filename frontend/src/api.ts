@@ -28,6 +28,8 @@ export interface AppState {
   topic_order: string[];
   topic_summary: TopicSummary[];
   todays_problems: Problem[];
+  extra_credit: Problem[];
+  today_done_count: number;
   sunday_review: Problem[];
   streak: number;
   pace_7d: number;
@@ -76,6 +78,42 @@ export async function setGoal(goal: number) {
 
 export async function resetAll() {
   const r = await fetch(`${API}/reset`, { method: "POST" });
+  if (!r.ok) throw new Error("failed");
+  return r.json();
+}
+
+export interface BehavioralQuestion {
+  question: string;
+  category: string;
+}
+
+export interface BehavioralReview {
+  score: number;
+  star: {
+    situation: "clear" | "weak" | "missing";
+    task: "clear" | "weak" | "missing";
+    action: "clear" | "weak" | "missing";
+    result: "clear" | "weak" | "missing";
+  };
+  strengths: string[];
+  improvements: string[];
+  summary: string;
+}
+
+export async function getQuestion(category?: string): Promise<BehavioralQuestion> {
+  const url = new URL(`${API}/behavioral/question`, window.location.origin);
+  if (category) url.searchParams.set("category", category);
+  const r = await fetch(url.toString());
+  if (!r.ok) throw new Error("failed");
+  return r.json();
+}
+
+export async function reviewAnswer(question: string, answer: string): Promise<BehavioralReview> {
+  const r = await fetch(`${API}/behavioral/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, answer }),
+  });
   if (!r.ok) throw new Error("failed");
   return r.json();
 }
