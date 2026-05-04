@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import math
 import os
 import random
 from datetime import date, datetime, timedelta
@@ -174,25 +175,35 @@ def compute_streak(log: dict, goal: int) -> int:
     return streak
 
 
-def compute_pace(log: dict, days: int = 7) -> float:
+def compute_pace(state: dict, days: int = 7) -> float:
+    # Count distinct problems whose completed_date falls in the last `days`.
+    # Source of truth is the problem itself, so undo/refinish can't desync it.
     today = date.today()
-    total = 0
-    for i in range(days):
-        d = (today - timedelta(days=i)).isoformat()
-        total += log.get(d, 0)
-    return total / days if days else 0.0
+    cutoff = today - timedelta(days=days - 1)
+    n = 0
+    for p in state["problems"]:
+        cd = p.get("completed_date")
+        if not cd:
+            continue
+        try:
+            d = date.fromisoformat(cd)
+        except ValueError:
+            continue
+        if cutoff <= d <= today:
+            n += 1
+    return n / days if days else 0.0
 
 
 def projected_finish(state: dict) -> Optional[str]:
     remaining = sum(1 for p in state["problems"] if not p["done"])
     if remaining == 0:
         return None
-    # Use whichever is higher: actual 7d pace or daily goal.
-    # Assumes you'll at least hit your goal going forward, so the projection
-    # doesn't look worse than "on track" just because the rolling avg is low.
-    pace = max(compute_pace(state["completions_log"], 7), state["daily_goal"])
-    days = remaining / pace
-    return (date.today() + timedelta(days=int(round(days)))).isoformat()
+    # Project assuming you keep hitting the daily goal going forward.
+    pace = state["daily_goal"]
+    if pace <= 0:
+        return None
+    days = math.ceil(remaining / pace)
+    return (date.today() + timedelta(days=days)).isoformat()
 
 
 def required_pace(state: dict) -> float:
@@ -278,7 +289,7 @@ def get_state():
             "today_done_count": s["completions_log"].get(today_iso(), 0),
             "sunday_review": sunday_review(s),
             "streak": compute_streak(s["completions_log"], s["daily_goal"]),
-            "pace_7d": round(compute_pace(s["completions_log"], 7), 2),
+            "pace_7d": round(compute_pace(s, 7), 2),
             "required_pace": round(required_pace(s), 2),
             "projected_finish": projected_finish(s),
             "remaining": sum(1 for p in s["problems"] if not p["done"]),
@@ -303,11 +314,10 @@ def patch_problem(pid: int, upd: ProblemUpdate):
                 p["last_done_date"] = today
                 bump_today(s)
             else:
-                # Only decrement today's count if it was checked off today
-                if p.get("last_done_date") == today:
-                    t = today_iso()
-                    if s["completions_log"].get(t, 0) > 0:
-                        s["completions_log"][t] -= 1
+                # Roll back the day this completion was logged against
+                d = p.get("last_done_date")
+                if d and s["completions_log"].get(d, 0) > 0:
+                    s["completions_log"][d] -= 1
                 p["completed_date"] = None
                 p["last_done_date"] = None
 
@@ -338,13 +348,17 @@ def review_problem(pid: int):
         p = s["problems"][pid]
         if not p["shaky"]:
             raise HTTPException(400, "not shaky")
-        p["shaky_set_date"] = today_iso()
-        p["review_count"] += 1
+        today = today_iso()
+        # Guard against same-day double-bump if the endpoint is hit twice.
+        already_reviewed_today = p.get("shaky_set_date") == today and p.get("review_count", 0) > 0
+        p["shaky_set_date"] = today
+        if not already_reviewed_today:
+            p["review_count"] += 1
+            bump_today(s)
         if p["review_count"] >= len(REVIEW_INTERVALS):
             p["shaky"] = False
             p["shaky_set_date"] = None
             p["review_count"] = 0
-        bump_today(s)
         save(s)
         return p
 
