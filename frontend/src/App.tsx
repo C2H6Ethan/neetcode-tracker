@@ -188,8 +188,8 @@ function ProblemRow({
 }
 
 // ====== Topic accordion item ======
-function TopicItem({ topic, problems, defaultOpen, children }: {
-  topic: string; problems: Problem[]; defaultOpen: boolean; children: React.ReactNode;
+function TopicItem({ topic, problems, defaultOpen, scrollRef, children }: {
+  topic: string; problems: Problem[]; defaultOpen: boolean; scrollRef?: React.RefObject<HTMLDivElement | null>; children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const done = problems.filter(p => p.done).length;
@@ -198,7 +198,7 @@ function TopicItem({ topic, problems, defaultOpen, children }: {
   const complete = done === total;
 
   return (
-    <div className="topic">
+    <div className="topic" ref={scrollRef}>
       <button className="topic-head" onClick={() => setOpen(o => !o)}>
         <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <IconChevronRight size={16} className={`caret ${open ? "open" : ""}`} />
@@ -629,6 +629,13 @@ export default function App() {
     return map;
   }, [state]);
 
+  const firstIncompleteRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (tab === "all") {
+      setTimeout(() => firstIncompleteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    }
+  }, [tab]);
+
   if (loading || !state) {
     return <div className="loading"><div className="spinner" /></div>;
   }
@@ -855,7 +862,13 @@ export default function App() {
         )}
 
         {/* ALL */}
-        {tab === "all" && (
+        {tab === "all" && (() => {
+          const firstIncompleteIdx = state.topic_order.findIndex(t => {
+            const ps = problemsByTopic[t] ?? [];
+            return ps.some(p => !p.done);
+          });
+          const targetIdx = firstIncompleteIdx === -1 ? 0 : firstIncompleteIdx;
+          return (
           <div>
             <div className="section-head">
               <div className="section-title">All problems by topic</div>
@@ -866,7 +879,8 @@ export default function App() {
                 key={topic}
                 topic={topic}
                 problems={problemsByTopic[topic] ?? []}
-                defaultOpen={i === 0}
+                defaultOpen={i === targetIdx}
+                scrollRef={i === targetIdx ? firstIncompleteRef : undefined}
               >
                 {(problemsByTopic[topic] ?? []).map(p => (
                   <ProblemRow
@@ -880,7 +894,8 @@ export default function App() {
               </TopicItem>
             ))}
           </div>
-        )}
+          );
+        })()}
 
         {/* SHAKY */}
         {tab === "review" && (() => {
