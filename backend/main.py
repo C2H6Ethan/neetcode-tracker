@@ -349,12 +349,9 @@ def review_problem(pid: int):
         if not p["shaky"]:
             raise HTTPException(400, "not shaky")
         today = today_iso()
-        # Guard against same-day double-bump if the endpoint is hit twice.
-        already_reviewed_today = p.get("shaky_set_date") == today and p.get("review_count", 0) > 0
         p["shaky_set_date"] = today
-        if not already_reviewed_today:
-            p["review_count"] += 1
-            bump_today(s)
+        p["review_count"] += 1
+        bump_today(s)
         if p["review_count"] >= len(REVIEW_INTERVALS):
             p["shaky"] = False
             p["shaky_set_date"] = None
