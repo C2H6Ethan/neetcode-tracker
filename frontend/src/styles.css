@@ -659,6 +659,38 @@ body::after {
   color: #1a0e00;
 }
 .iaction.good:hover { color: var(--teal); border-color: rgba(52, 211, 153, 0.3); }
+.iaction.danger:hover { color: #fda4af; border-color: rgba(251, 113, 133, 0.3); }
+
+.add-custom-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.add-custom-input {
+  flex: 1;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0 12px;
+  height: 36px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.add-custom-input:focus { border-color: var(--violet); }
+.add-custom-select {
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0 10px;
+  height: 36px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.add-custom-row .btn-save { height: 36px; align-self: auto; }
 
 .notes-edit {
   margin-top: 10px;

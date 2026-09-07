@@ -8,10 +8,11 @@ import {
 } from "@tabler/icons-react";
 import {
   AppState, Problem, getState, patchProblem, reviewProblem, setGoal, resetAll,
+  createProblem, deleteProblem,
   BehavioralQuestion, BehavioralReview, getQuestion, reviewAnswer,
 } from "./api";
 
-type TabKey = "today" | "all" | "review" | "topics" | "interview";
+type TabKey = "today" | "all" | "custom" | "review" | "topics" | "interview";
 
 // ----- helpers -----
 const fmtDate = (s: string) => {
@@ -125,10 +126,11 @@ function Stat({
 
 // ====== Problem row ======
 function ProblemRow({
-  p, onToggleDone, onToggleShaky, onReview, onNotes, showKind,
+  p, onToggleDone, onToggleShaky, onReview, onNotes, showKind, onDelete,
 }: {
   p: Problem; onToggleDone: () => void; onToggleShaky: () => void;
   onReview?: () => void; onNotes: (s: string) => void; showKind?: boolean;
+  onDelete?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(p.notes);
@@ -182,6 +184,13 @@ function ProblemRow({
             <IconNotebook size={15} />
           </button>
         </Tooltip>
+        {onDelete && (
+          <Tooltip label="Delete problem" withArrow>
+            <button className="iaction danger" onClick={onDelete}>
+              <IconTrash size={15} />
+            </button>
+          </Tooltip>
+        )}
       </div>
     </div>
   );
@@ -210,6 +219,76 @@ function TopicItem({ topic, problems, defaultOpen, scrollRef, children }: {
         </span>
       </button>
       {open && <div className="topic-body">{children}</div>}
+    </div>
+  );
+}
+
+// ====== Custom problems tab ======
+function CustomTab({
+  problems, onAdd, onToggleDone, onToggleShaky, onReview, onNotes, onDelete,
+}: {
+  problems: Problem[];
+  onAdd: (name: string, difficulty: "easy" | "medium" | "hard") => void;
+  onToggleDone: (p: Problem) => void;
+  onToggleShaky: (p: Problem) => void;
+  onReview: (p: Problem) => void;
+  onNotes: (p: Problem, notes: string) => void;
+  onDelete: (p: Problem) => void;
+}) {
+  const [name, setName] = useState("");
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+
+  const submit = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onAdd(trimmed, difficulty);
+    setName("");
+  };
+
+  return (
+    <div>
+      <div className="section-head">
+        <div className="section-title">Custom problems</div>
+        <div className="section-meta">{problems.length} total</div>
+      </div>
+      <div className="add-custom-row">
+        <input
+          className="add-custom-input"
+          aria-label="Problem name"
+          placeholder="Problem name, e.g. Word Break II"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+        />
+        <select
+          className="add-custom-select"
+          aria-label="Difficulty"
+          value={difficulty}
+          onChange={(e) => setDifficulty(e.target.value as "easy" | "medium" | "hard")}
+        >
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <button className="btn-save" onClick={submit}>Add</button>
+      </div>
+      {problems.length === 0 ? (
+        <div className="empty">
+          <div className="empty-emoji">📝</div>
+          <div>Add any other LeetCode problem you want to track outside the 150.</div>
+        </div>
+      ) : (
+        problems.map(p => (
+          <ProblemRow
+            key={p.id} p={p}
+            onToggleDone={() => onToggleDone(p)}
+            onToggleShaky={() => onToggleShaky(p)}
+            onReview={p.shaky ? () => onReview(p) : undefined}
+            onNotes={(n) => onNotes(p, n)}
+            onDelete={() => onDelete(p)}
+          />
+        ))
+      )}
     </div>
   );
 }
@@ -625,9 +704,17 @@ export default function App() {
     if (!state) return {};
     const map: Record<string, Problem[]> = {};
     for (const t of state.topic_order) map[t] = [];
-    for (const p of state.problems) map[p.topic].push(p);
+    for (const p of state.problems) {
+      if (p.source === "custom") continue;
+      map[p.topic]?.push(p);
+    }
     return map;
   }, [state]);
+
+  const customProblems = useMemo(
+    () => (state ? state.problems.filter(p => p.source === "custom") : []),
+    [state]
+  );
 
   const firstIncompleteRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -657,6 +744,11 @@ export default function App() {
     refresh();
   };
   const handleNotes = async (p: Problem, notes: string) => { await patchProblem(p.id, { notes }); refresh(); };
+  const handleAddCustom = async (name: string, difficulty: "easy" | "medium" | "hard") => {
+    await createProblem(name, difficulty);
+    refresh();
+  };
+  const handleDeleteCustom = async (p: Problem) => { await deleteProblem(p.id); refresh(); };
   const handleGoal = async (g: number) => { await setGoal(g); refresh(); };
   const handleReset = async () => {
     await resetAll(); setResetOpen(false);
@@ -664,7 +756,6 @@ export default function App() {
   };
 
   const pct = (state.total_done / 150) * 100;
-  const daysLeft = Math.max(0, Math.ceil((new Date(state.target_date).getTime() - Date.now()) / 86400000));
   const todayList = state.todays_problems;
   const todayDoneCount = state.today_done_count;
   const goalHit = state.today_done_count >= state.daily_goal && state.remaining > 0;
@@ -724,8 +815,8 @@ export default function App() {
             ) : (
               <>
                 <em>{state.remaining}</em> problems<br />
-                between you and<br />
-                <em>that internship.</em>
+                left in the<br />
+                <em>NeetCode 150.</em>
               </>
             )}
           </h1>
@@ -744,8 +835,8 @@ export default function App() {
               <div className="label">Streak</div>
             </div>
             <div className="hero-stat">
-              <div className="num">{daysLeft}<span style={{ color: "var(--text-mute)", fontSize: 16, marginLeft: 4 }}>d</span></div>
-              <div className="label">Until target</div>
+              <div className="num">{state.remaining}</div>
+              <div className="label">Remaining</div>
             </div>
           </div>
         </div>
@@ -785,7 +876,7 @@ export default function App() {
           icon={<IconCalendarStats size={16} />}
           label="Projected finish"
           value={state.projected_finish ?? "—"}
-          sub={`target ${state.target_date}`}
+          sub="at current pace"
           accent={{ bg: "rgba(244, 114, 182, 0.14)", color: "#f9a8d4", gradient: "linear-gradient(90deg, #f472b6, #a78bfa)" }}
         />
       </div>
@@ -797,7 +888,8 @@ export default function App() {
           onChange={setTab}
           items={[
             { key: "today",  label: "Today",        icon: <IconRocket size={14}/> },
-            { key: "all",    label: "All Problems", icon: <IconSparkles size={14}/> },
+            { key: "all",    label: "NeetCode 150", icon: <IconSparkles size={14}/> },
+            { key: "custom", label: "Custom",       icon: <IconNotebook size={14}/>, badge: customProblems.length },
             { key: "review", label: "Shaky",        icon: <IconAlertTriangle size={14}/>, badge: state.sunday_review.length },
             { key: "topics", label: "By Topic" },
             { key: "interview", label: "Interview" },
@@ -811,7 +903,7 @@ export default function App() {
             {state.remaining === 0 && (
               <div className="empty">
                 <div className="empty-emoji">🚀</div>
-                <div>All 150 done. Go get that internship.</div>
+                <div>All 150 done. Nice work.</div>
               </div>
             )}
 
@@ -871,8 +963,8 @@ export default function App() {
           return (
           <div>
             <div className="section-head">
-              <div className="section-title">All problems by topic</div>
-              <div className="section-meta">{state.problems.length} total</div>
+              <div className="section-title">NeetCode 150 by topic</div>
+              <div className="section-meta">{state.total_done + state.remaining} total</div>
             </div>
             {state.topic_order.map((topic, i) => (
               <TopicItem
@@ -896,6 +988,19 @@ export default function App() {
           </div>
           );
         })()}
+
+        {/* CUSTOM */}
+        {tab === "custom" && (
+          <CustomTab
+            problems={customProblems}
+            onAdd={handleAddCustom}
+            onToggleDone={handleToggle}
+            onToggleShaky={handleShaky}
+            onReview={handleReview}
+            onNotes={handleNotes}
+            onDelete={handleDeleteCustom}
+          />
+        )}
 
         {/* SHAKY */}
         {tab === "review" && (() => {

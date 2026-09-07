@@ -10,6 +10,7 @@ export interface Problem {
   review_count: number;
   notes: string;
   kind?: "new" | "review";
+  source?: "neetcode" | "custom";
 }
 
 export interface TopicSummary {
@@ -21,7 +22,6 @@ export interface TopicSummary {
 
 export interface AppState {
   daily_goal: number;
-  target_date: string;
   today: string;
   is_sunday: boolean;
   problems: Problem[];
@@ -56,6 +56,22 @@ export async function patchProblem(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (!r.ok) throw new Error("failed");
+  return r.json();
+}
+
+export async function createProblem(name: string, difficulty: "easy" | "medium" | "hard"): Promise<Problem> {
+  const r = await fetch(`${API}/problems`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, difficulty }),
+  });
+  if (!r.ok) throw new Error("failed");
+  return r.json();
+}
+
+export async function deleteProblem(id: number) {
+  const r = await fetch(`${API}/problems/${id}`, { method: "DELETE" });
   if (!r.ok) throw new Error("failed");
   return r.json();
 }

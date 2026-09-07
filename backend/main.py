@@ -6,13 +6,13 @@ import random
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from anthropic import Anthropic
 
 from problems import NEETCODE_150, TOPIC_ORDER
@@ -20,7 +20,6 @@ from problems import NEETCODE_150, TOPIC_ORDER
 DATA_PATH = Path(os.environ.get("DATA_PATH", "/data/data.json"))
 STATIC_DIR = Path(os.environ.get("STATIC_DIR", "/app/static"))
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-TARGET_DATE = date(2026, 7, 15)
 REVIEW_INTERVALS = [1, 3, 7]  # days
 
 _lock = Lock()
@@ -106,6 +105,7 @@ def default_state() -> dict:
             "shaky_set_date": None,      # ISO date when last marked shaky / last reviewed
             "review_count": 0,           # number of spaced reviews completed
             "notes": "",
+            "source": "neetcode",
         })
     return {
         "daily_goal": 3,
@@ -126,7 +126,13 @@ def load() -> dict:
     # Migrations: ensure new fields exist
     if "behavioral_history" not in s:
         s["behavioral_history"] = []
+    for p in s["problems"]:
+        p.setdefault("source", "neetcode")
     return s
+
+
+def neetcode_problems(state: dict) -> list[dict]:
+    return [p for p in state["problems"] if p.get("source", "neetcode") == "neetcode"]
 
 
 def save(state: dict) -> None:
@@ -181,7 +187,7 @@ def compute_pace(state: dict, days: int = 7) -> float:
     today = date.today()
     cutoff = today - timedelta(days=days - 1)
     n = 0
-    for p in state["problems"]:
+    for p in neetcode_problems(state):
         cd = p.get("completed_date")
         if not cd:
             continue
@@ -195,7 +201,7 @@ def compute_pace(state: dict, days: int = 7) -> float:
 
 
 def projected_finish(state: dict) -> Optional[str]:
-    remaining = sum(1 for p in state["problems"] if not p["done"])
+    remaining = sum(1 for p in neetcode_problems(state) if not p["done"])
     if remaining == 0:
         return None
     # Project assuming you keep hitting the daily goal going forward.
@@ -207,11 +213,8 @@ def projected_finish(state: dict) -> Optional[str]:
 
 
 def required_pace(state: dict) -> float:
-    remaining = sum(1 for p in state["problems"] if not p["done"])
-    days_left = (TARGET_DATE - date.today()).days
-    if days_left <= 0:
-        return float("inf") if remaining else 0.0
-    return remaining / days_left
+    """Pace needed to hit the user's own daily goal."""
+    return float(state["daily_goal"])
 
 
 def todays_problems(state: dict) -> list[dict]:
@@ -220,9 +223,10 @@ def todays_problems(state: dict) -> list[dict]:
     today = date.today()
     today_str = today.isoformat()
     goal = state["daily_goal"]
-    due_reviews = [p for p in state["problems"] if is_due(p, today)]
+    pool = neetcode_problems(state)
+    due_reviews = [p for p in pool if is_due(p, today)]
     # unsolved problems OR problems already completed today (they keep their slot)
-    sticky = [p for p in state["problems"] if not p["done"] or p["completed_date"] == today_str]
+    sticky = [p for p in pool if not p["done"] or p["completed_date"] == today_str]
     unsolved = [p for p in sticky if not p["done"]]
     max_reviews = max(0, goal - 1) if unsolved else goal
     picked_reviews = due_reviews[:max_reviews]
@@ -236,7 +240,7 @@ def extra_credit_problems(state: dict, today_ids: set, n: int = 5) -> list[dict]
     """Next N unsolved problems beyond today's queue — for bonus work."""
     return [
         {**p, "kind": "new"}
-        for p in state["problems"]
+        for p in neetcode_problems(state)
         if not p["done"] and p["id"] not in today_ids
     ][:n]
 
@@ -247,8 +251,9 @@ def sunday_review(state: dict) -> list[dict]:
 
 def topic_summary(state: dict) -> list[dict]:
     out = []
+    pool = neetcode_problems(state)
     for topic in TOPIC_ORDER:
-        ps = [p for p in state["problems"] if p["topic"] == topic]
+        ps = [p for p in pool if p["topic"] == topic]
         done = sum(1 for p in ps if p["done"])
         shaky = sum(1 for p in ps if p["shaky"])
         out.append({"topic": topic, "total": len(ps), "done": done, "shaky": shaky})
@@ -266,6 +271,18 @@ class ProblemUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class ProblemCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+
+
+def find_problem(state: dict, pid: int) -> dict:
+    p = next((p for p in state["problems"] if p["id"] == pid), None)
+    if p is None:
+        raise HTTPException(404)
+    return p
+
+
 class GoalUpdate(BaseModel):
     daily_goal: int
 
@@ -278,7 +295,6 @@ def get_state():
         today_ids = {p["id"] for p in today_probs}
         return {
             "daily_goal": s["daily_goal"],
-            "target_date": TARGET_DATE.isoformat(),
             "today": today_iso(),
             "is_sunday": date.today().weekday() == 6,
             "problems": s["problems"],
@@ -292,8 +308,8 @@ def get_state():
             "pace_7d": round(compute_pace(s, 7), 2),
             "required_pace": round(required_pace(s), 2),
             "projected_finish": projected_finish(s),
-            "remaining": sum(1 for p in s["problems"] if not p["done"]),
-            "total_done": sum(1 for p in s["problems"] if p["done"]),
+            "remaining": sum(1 for p in neetcode_problems(s) if not p["done"]),
+            "total_done": sum(1 for p in neetcode_problems(s) if p["done"]),
         }
 
 
@@ -301,9 +317,7 @@ def get_state():
 def patch_problem(pid: int, upd: ProblemUpdate):
     with _lock:
         s = load()
-        if pid < 0 or pid >= len(s["problems"]):
-            raise HTTPException(404)
-        p = s["problems"][pid]
+        p = find_problem(s, pid)
         today = today_iso()
 
         if upd.done is not None and upd.done != p["done"]:
@@ -343,9 +357,7 @@ def review_problem(pid: int):
     """Mark a shaky problem as reviewed today — advances spaced-rep interval."""
     with _lock:
         s = load()
-        if pid < 0 or pid >= len(s["problems"]):
-            raise HTTPException(404)
-        p = s["problems"][pid]
+        p = find_problem(s, pid)
         if not p["shaky"]:
             raise HTTPException(400, "not shaky")
         today = today_iso()
@@ -358,6 +370,44 @@ def review_problem(pid: int):
             p["review_count"] = 0
         save(s)
         return p
+
+
+@app.post("/api/problems")
+def create_problem(body: ProblemCreate):
+    with _lock:
+        s = load()
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(400, "name required")
+        new_id = max((p["id"] for p in s["problems"]), default=-1) + 1
+        p = {
+            "id": new_id,
+            "topic": "Custom",
+            "name": name,
+            "difficulty": body.difficulty,
+            "done": False,
+            "shaky": False,
+            "completed_date": None,
+            "shaky_set_date": None,
+            "review_count": 0,
+            "notes": "",
+            "source": "custom",
+        }
+        s["problems"].append(p)
+        save(s)
+        return p
+
+
+@app.delete("/api/problems/{pid}")
+def delete_problem(pid: int):
+    with _lock:
+        s = load()
+        p = find_problem(s, pid)
+        if p.get("source") != "custom":
+            raise HTTPException(400, "cannot delete a NeetCode 150 problem")
+        s["problems"] = [q for q in s["problems"] if q["id"] != pid]
+        save(s)
+        return {"ok": True}
 
 
 @app.put("/api/goal")
